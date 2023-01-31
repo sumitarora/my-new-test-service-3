@@ -1,0 +1,12 @@
+name: deploy-pipeline
+
+on: 
+  repository_dispatch:
+    types: [deployment]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: deploy to cluster
+        run: echo "hello deploy image"

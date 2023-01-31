@@ -1,0 +1,32 @@
+name: send-notification
+
+on:
+  workflow_call:
+    inputs:
+      message:
+        description: 'slack alert message'
+        required: true
+        type: string
+
+jobs:
+  send-notification:
+    runs-on: ubuntu-latest
+
+    steps:    
+      - name: checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: send slack notification
+        id: notifyRequest
+        uses: fjogeleit/http-request-action@v1
+        with:
+          url: 'https://nebula-rho-pink.vercel.app/api/slack-alerts?name=${{ github.event.repository.name }}&message=${{ inputs.message }}&buildUrl=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}&commitHash=${{ github.event.head_commit.url }}&commitMessage=${{ github.event.head_commit.message }}&branch=${{ github.head_ref }}&author=${{ github.actor }}'
+          method: 'GET'
+          preventFailureOnNoResponse: 'true'
+          customHeaders: '{"Content-Type": "application/json"}'
+      - name: Show Response
+        run: |
+          echo ${{ steps.notifyRequest.outputs.response }}
+          echo ${{ steps.notifyRequest.outputs.headers }}

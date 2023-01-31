@@ -1,0 +1,94 @@
+name: create-service-repository
+run-name: create repository for ${{inputs.service_name}}
+
+on:
+  workflow_dispatch:
+    inputs:
+      service_name:
+        description: "The name of service to create"
+        required: true
+        type: string
+permissions:
+  contents: write 
+
+jobs:
+  repository_creation:
+    runs-on: ubuntu-latest
+    permissions: write-all
+    name: setup 
+    steps:
+      # Create a new repo with the service name      
+      - name: Create new repo on github
+        run: gh repo create ${{inputs.service_name}} --public --add-readme
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_ACCESS_TOKEN }}
+
+      - uses: actions/checkout@v3
+
+      - name: Use Node.js 16.x
+        uses: actions/setup-node@v3
+        with:
+          node-version: '16.x'  
+
+      - name: Install nestjs cli
+        run: npm install -g @nestjs/cli
+
+      # Create nest application with npm as package manager
+      - name: Create nest application
+        run: nest new ${{inputs.service_name}} <<< $'\n'
+
+      # TODO: should validate it here with npm run start and a curl maybe?
+      # Remove unnecessary files
+      - name: Remove generated git folder
+        run: rm -rf ${{inputs.service_name}}/.git
+
+      - name: Remove generated node_modules
+        run: rm -rf ${{inputs.service_name}}/node_modules
+
+      # Removing lock files doesn't run actions on newly generated repo
+      # - name: Remove generated package-lock.json
+      #   run: rm -rf ${{inputs.service_name}}/package-lock.json
+
+      - name: Copy build.yml to the new api repo
+        run: mkdir -p ${{inputs.service_name}}/.github/workflows && cp -a .github/workflows/. ${{inputs.service_name}}/.github/workflows/. 
+
+      - name: Copy docs to the newly generated repository
+        run: |
+            mkdir ${{inputs.service_name}}/docs
+            cp -a ./docs/. ${{inputs.service_name}}/docs/. 
+            rm -rf ${{inputs.service_name}}/README.md
+            mv README.md ${{inputs.service_name}}/.
+
+      - name: Add sonar-project.properties file
+        run: |
+            echo 'sonar.projectKey=${{inputs.service_name}}' > ${{inputs.service_name}}/sonar-project.properties
+            echo 'sonar.sources=./src' >> ${{inputs.service_name}}/sonar-project.properties
+            echo 'sonar.exclusions=**/*.spec.ts,**/*.controller.ts,**/*.module.ts,**/main.ts,**/*.e2e-spec.ts' >> ${{inputs.service_name}}/sonar-project.properties
+            echo 'sonar.tests=test/' >> ${{inputs.service_name}}/sonar-project.properties
+            echo 'sonar.test.inclusions=**/*.spec.ts' >> ${{inputs.service_name}}/sonar-project.properties
+            echo 'sonar.ts.tslintpath=.eslintrc.js' >> ${{inputs.service_name}}/sonar-project.properties
+            
+      - name: Copy main.ts with configurations
+        run: |
+          echo "import { NestFactory } from '@nestjs/core';
+          import { AppModule } from './app.module';
+
+          async function bootstrap() {
+            const app = await NestFactory.create(AppModule);
+            app.setGlobalPrefix(\"${{inputs.service_name}}\");
+            await app.listen(8080);
+          }
+          bootstrap();" > ${{inputs.service_name}}/src/main.ts
+
+      # Copy generated content to remote repository
+      - name: Push generated folder
+        uses: cpina/github-action-push-to-another-repository@v1.4.2
+        env:
+          API_TOKEN_GITHUB: ${{ secrets.GH_ACCESS_TOKEN }}
+        with:
+          source-directory: ${{inputs.service_name}}
+          destination-github-username: ${{github.repository_owner}}
+          destination-repository-name: ${{inputs.service_name}}
+          user-email: ${{inputs.repository_owner}}
+          commit-message: "initial repository setup"
+          target-branch: main

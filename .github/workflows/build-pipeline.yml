@@ -1,0 +1,102 @@
+name: build-pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+
+  build-validate:
+    uses: ./.github/workflows/build-validate.yml
+    secrets:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+
+  package:
+    runs-on: ubuntu-latest
+    needs: [build-validate]
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      
+      - name: setup node
+        uses: actions/setup-node@v3
+        with:
+          node-version: 17.x
+          cache: npm
+      
+      - run: npm ci
+      - run: npm run build --if-present
+
+      - name: tag version
+        id: tag_version
+        uses: rymndhng/release-on-push-action@master
+        with:
+          bump_version_scheme: minor
+          tag_prefix: v      
+
+      - name: verify tags
+        run: |
+          echo "Tag name ${{ steps.tag_version.outputs.tag_name }}"
+          echo "Release version ${{ steps.tag_version.outputs.version }}"
+
+      - name: build and push docker image
+        uses: mr-smithers-excellent/docker-build-push@v5
+        with:
+          tags: ${{steps.tag_version.outputs.tag_name}}
+          image: sumitrangle/hello-nest-api
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: triggering deploy job
+        uses: peter-evans/repository-dispatch@v2
+        with:
+          event-type: deployment
+
+
+  notify_user_on_failure:
+    needs: [package]
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - uses: ./.github/workflows/shared/send-notification
+        with:
+          message: "❌ build failed for repository ${{ github.repository }}"
+
+  notify_user_on_success:
+    needs: [package]
+    if: success()
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - uses: ./.github/workflows/shared/send-notification
+        with:
+          message: "✅ build passed for repository ${{ github.repository }}"
+
+  notify_user_on_failure_1:
+    needs: [package]
+    if: failure()
+    uses: ./.github/workflows/send-notification.yml
+    with:
+      message: "❌ build failed for repository ${{ github.repository }}"
+
+  notify_user_on_success_1:
+    needs: [package]
+    if: success()
+    uses: ./.github/workflows/send-notification.yml
+    with:
+      message: "✅ build passed for repository ${{ github.repository }}"
